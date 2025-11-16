@@ -12,7 +12,8 @@ import 'profile_screen.dart';
 import 'login_screen.dart';
 
 class PatientsListScreen extends StatefulWidget {
-  const PatientsListScreen({super.key});
+  final bool showIncompleteOnly;
+  const PatientsListScreen({super.key, this.showIncompleteOnly = false});
 
   @override
   State<PatientsListScreen> createState() => _PatientsListScreenState();
@@ -83,12 +84,17 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
 
   Future<void> _loadPatients({String? query}) async {
     setState(() => _isLoading = true);
-    final result = await _patientService.getPatients(query: query);
+    final result = await _patientService.getAllPatients(query: query);
     if (mounted) {
       setState(() {
         _isLoading = false;
         if (result['success'] == true) {
           _patients = result['patients'] as List<Patient>;
+          if (widget.showIncompleteOnly) {
+            _patients = _patients.where((p) => p.progressPercentage < 100).toList();
+          }
+          // sort newest-first by registrationDate desc
+          _patients.sort((a, b) => b.registrationDate.compareTo(a.registrationDate));
         }
       });
 
@@ -397,12 +403,6 @@ class _PatientCard extends StatelessWidget {
                                 AppTheme.primaryBlue.withOpacity(0.05),
                               ],
                       ),
-                      image: avatarUrl != null
-                          ? DecorationImage(
-                              image: CachedNetworkImageProvider(avatarUrl!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
                       boxShadow: [
                         BoxShadow(
                           color: AppTheme.primaryBlue.withOpacity(0.15),
@@ -417,7 +417,34 @@ class _PatientCard extends StatelessWidget {
                             color: AppTheme.primaryBlue,
                             size: 32,
                           )
-                        : null,
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: CachedNetworkImage(
+                              imageUrl: avatarUrl,
+                              width: 60,
+                              height: 80,
+                              fit: BoxFit.cover,
+                              memCacheHeight: 160,
+                              memCacheWidth: 120,
+                              maxHeightDiskCache: 200,
+                              maxWidthDiskCache: 150,
+                              placeholder: (context, url) => Container(
+                                color: AppTheme.primaryBlue.withOpacity(0.1),
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (context, url, error) => const Icon(
+                                Icons.person_rounded,
+                                color: AppTheme.primaryBlue,
+                                size: 32,
+                              ),
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 12),

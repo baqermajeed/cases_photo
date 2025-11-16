@@ -8,5 +8,11 @@ class PatientCreate(BaseModel):
     address: str
 
 
+class PatientUpdate(BaseModel):
+    name: str
+    phone: str
+    address: str
+
+
 class StepDoneRequest(BaseModel):
     is_done: Optional[bool] = True

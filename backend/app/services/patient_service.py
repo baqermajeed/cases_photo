@@ -90,6 +90,16 @@ async def get_patient(patient_id: str) -> Patient:
     return patient
 
 
+async def update_patient(patient_id: str, name: str, phone: str, address: str) -> Patient:
+    """تحديث بيانات المريض الأساسية"""
+    patient = await get_patient(patient_id)
+    patient.name = name
+    patient.phone = phone
+    patient.address = address
+    await patient.save()
+    return patient
+
+
 def get_step(patient: Patient, step_number: int) -> Step:
     for step in patient.steps:
         if step.step_number == step_number:

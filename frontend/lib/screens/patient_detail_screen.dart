@@ -6,7 +6,6 @@ import 'package:intl/intl.dart' as intl;
 import 'package:dio/dio.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../core/theme/app_theme.dart';
 import '../models/patient.dart';
@@ -48,7 +47,40 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
   }
 
   Future<void> _pickImages(int stepNumber) async {
-    final images = await _imagePicker.pickMultiImage(imageQuality: 85);
+    // اختر المصدر أولاً
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded),
+                title: const Text('التقاط صورة بالكاميرا'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded),
+                title: const Text('اختيار صور من المعرض'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    List<XFile> images = [];
+    if (source == ImageSource.gallery) {
+      images = await _imagePicker.pickMultiImage(imageQuality: 85);
+    } else {
+      final captured = await _imagePicker.pickImage(source: ImageSource.camera, imageQuality: 85);
+      if (captured != null) images = [captured];
+    }
     if (images.isEmpty) return;
 
     if (!mounted) return;
@@ -371,17 +403,32 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                 height: 160,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  image: avatarUrl != null
-                      ? DecorationImage(
-                          image: CachedNetworkImageProvider(avatarUrl!),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
                   color: avatarUrl == null ? Colors.grey.shade200 : null,
                 ),
                 child: avatarUrl == null
                     ? Icon(Icons.person, size: 60, color: Colors.grey.shade400)
-                    : null,
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: CachedNetworkImage(
+                          imageUrl: avatarUrl,
+                          width: 130,
+                          height: 160,
+                          fit: BoxFit.cover,
+                          memCacheHeight: 320,  // ضعف الحجم للشاشات عالية الدقة
+                          memCacheWidth: 260,
+                          maxHeightDiskCache: 400,
+                          maxWidthDiskCache: 320,
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey.shade200,
+                            child: const Center(child: CircularProgressIndicator()),
+                          ),
+                          errorWidget: (context, url, error) => Icon(
+                            Icons.person,
+                            size: 60,
+                            color: Colors.grey.shade400,
+                          ),
+                        ),
+                      ),
               ),
             ],
           ),
@@ -642,6 +689,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                               width: 90,
                               height: 70,
                               fit: BoxFit.cover,
+                              memCacheHeight: 140,  // ضعف الحجم للشاشات عالية الدقة
+                              memCacheWidth: 180,
+                              maxHeightDiskCache: 200,
+                              maxWidthDiskCache: 250,
+                              fadeInDuration: const Duration(milliseconds: 200),
                               placeholder: (_, __) => Container(
                                 width: 90,
                                 height: 70,

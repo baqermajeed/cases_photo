@@ -238,12 +238,6 @@ class _CompletedPatientCard extends StatelessWidget {
                   height: 85,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
-                    image: avatarUrl != null
-                        ? DecorationImage(
-                            image: CachedNetworkImageProvider(avatarUrl!),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
                     color: avatarUrl == null ? AppTheme.successGreen.withOpacity(0.1) : null,
                     boxShadow: [
                       BoxShadow(
@@ -259,7 +253,34 @@ class _CompletedPatientCard extends StatelessWidget {
                           color: AppTheme.successGreen,
                           size: 36,
                         )
-                      : null,
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(
+                            imageUrl: avatarUrl,
+                            width: 70,
+                            height: 85,
+                            fit: BoxFit.cover,
+                            memCacheHeight: 170,
+                            memCacheWidth: 140,
+                            maxHeightDiskCache: 210,
+                            maxWidthDiskCache: 170,
+                            placeholder: (context, url) => Container(
+                              color: AppTheme.successGreen.withOpacity(0.1),
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            ),
+                            errorWidget: (context, url, error) => const Icon(
+                              Icons.person_rounded,
+                              color: AppTheme.successGreen,
+                              size: 36,
+                            ),
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 14),
                 // المعلومات

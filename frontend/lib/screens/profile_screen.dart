@@ -5,14 +5,13 @@ import '../services/auth_service.dart';
 import '../models/user.dart';
 import 'login_screen.dart';
 import 'statistics_screen.dart';
-import 'completed_patients_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
-}
+} 
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final _authService = AuthService();
@@ -194,20 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         },
       ),
-      const SizedBox(height: 12),
-      // زر المرضى المكتملين
-      _AdminButton(
-        icon: Icons.check_circle_outline,
-        title: 'المرضى المكتملين',
-        subtitle: 'عرض الحالات المكتملة',
-        color: AppTheme.successGreen,
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CompletedPatientsScreen()),
-          );
-        },
-      ),
+      // تمت إزالة زر المرضى المكتملين حسب المتطلبات
     ];
   }
 }

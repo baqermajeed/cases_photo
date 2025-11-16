@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../services/patient_service.dart';
+import 'completed_patients_screen.dart';
+import 'all_patients_screen.dart';
+import 'incomplete_patients_screen.dart';
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key});
@@ -151,6 +154,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFF5BA8D0), Color(0xFF4A90B8)],
                         ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const AllPatientsScreen()),
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       
@@ -163,6 +172,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                         gradient: const LinearGradient(
                           colors: [AppTheme.successGreen, Color(0xFF10B981)],
                         ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const CompletedPatientsScreen()),
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       
@@ -175,6 +190,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                         gradient: const LinearGradient(
                           colors: [Color(0xFFFFA726), Color(0xFFFF9800)],
                         ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const IncompletePatientsScreen()),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -190,8 +211,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     required String value,
     required Color color,
     required Gradient gradient,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final card = Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -260,6 +282,14 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           ),
         ],
       ),
+    );
+
+    if (onTap == null) return card;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: card,
     );
   }
 }

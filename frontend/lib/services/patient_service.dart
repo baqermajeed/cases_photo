@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -16,7 +15,7 @@ class PatientService {
   Future<Map<String, dynamic>> getPatients({
     String? query,
     int page = 1,
-    int limit = 20,
+    int limit = 1000,
   }) async {
     try {
       final token = await authService.getToken();
@@ -26,7 +25,8 @@ class PatientService {
 
       String url = '${ApiConstants.baseUrl}${ApiConstants.patients}?page=$page&limit=$limit';
       if (query != null && query.isNotEmpty) {
-        url += '&q=$query';
+        final q = Uri.encodeQueryComponent(query);
+        url += '&q=$q';
       }
 
       final response = await http
@@ -63,6 +63,64 @@ class PatientService {
     } catch (e) {
       return {'success': false, 'message': 'خطأ في الاتصال: $e'};
     }
+  }
+
+  // Fetch all patients across all pages (unlimited)
+  Future<Map<String, dynamic>> getAllPatients({String? query}) async {
+    final List<Patient> allPatients = [];
+    int page = 1;
+    // start conservatively; some backends cap limit (e.g., <=100)
+    int pageSize = 100;
+
+    while (true) {
+      Map<String, dynamic> result = await getPatients(query: query, page: page, limit: pageSize);
+      if (result['success'] != true) {
+        // If server rejects the limit, fallback to smaller page sizes
+        final msg = (result['message'] ?? '').toString().toLowerCase();
+        if (msg.contains('limit') || msg.contains('le') || msg.contains('less') || msg.contains('type')) {
+          if (pageSize > 50) {
+            pageSize = 50;
+            result = await getPatients(query: query, page: page, limit: pageSize);
+          } else if (pageSize > 20) {
+            pageSize = 20;
+            result = await getPatients(query: query, page: page, limit: pageSize);
+          }
+        }
+        if (result['success'] != true) {
+          return result;
+        }
+      }
+      final batch = (result['patients'] as List<Patient>);
+      allPatients.addAll(batch);
+
+      // Try to infer if more pages exist from pagination or batch size
+      final pagination = result['pagination'];
+      bool hasMore;
+      if (pagination is Map<String, dynamic>) {
+        if (pagination['has_next'] is bool) {
+          hasMore = pagination['has_next'] == true;
+        } else if (pagination['page'] != null && pagination['total_pages'] != null) {
+          try {
+            final int current = (pagination['page'] as num).toInt();
+            final int total = (pagination['total_pages'] as num).toInt();
+            hasMore = current < total;
+          } catch (_) {
+            hasMore = batch.length == pageSize;
+          }
+        } else if (pagination['next_page'] != null) {
+          hasMore = pagination['next_page'] != null;
+        } else {
+          hasMore = batch.length == pageSize;
+        }
+      } else {
+        hasMore = batch.length == pageSize;
+      }
+
+      if (!hasMore) break;
+      page += 1;
+    }
+
+    return {'success': true, 'patients': allPatients};
   }
 
   // Get patient by ID
@@ -125,6 +183,47 @@ class PatientService {
         };
       } else {
         return {'success': false, 'message': 'فشل في إضافة المريض'};
+      }
+    } on TimeoutException {
+      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
+    } catch (e) {
+      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  // Update patient basic info
+  Future<Map<String, dynamic>> updatePatient({
+    required String id,
+    required String name,
+    required String phone,
+    required String address,
+  }) async {
+    try {
+      final token = await authService.getToken();
+      if (token == null) {
+        return {'success': false, 'message': 'غير مسجل الدخول'};
+      }
+
+      final response = await http
+          .patch(
+            Uri.parse('${ApiConstants.baseUrl}${ApiConstants.patientById(id)}'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'name': name,
+              'phone': phone,
+              'address': address,
+            }),
+          )
+          .timeout(_timeout);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return {'success': true, 'patient': Patient.fromJson(data['data'])};
+      } else {
+        return {'success': false, 'message': 'فشل في تحديث بيانات المريض'};
       }
     } on TimeoutException {
       return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};

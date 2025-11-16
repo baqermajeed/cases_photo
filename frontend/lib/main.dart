@@ -8,7 +8,6 @@ import 'services/auth_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   // Initialize intl for Arabic date formatting
   await initializeDateFormatting('ar');
   
@@ -49,6 +48,17 @@ class FarahDentApp extends StatelessWidget {
       title: 'Farah photographers',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
+      // منع تغيير قياسات النصوص تبعاً لإعدادات الجهاز
+      builder: (context, child) {
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          // تثبيت عامل التكبير للنصوص على 1.0
+          data: mq.copyWith(
+            textScaler: const TextScaler.linear(1.0),
+          ),
+          child: child!,
+        );
+      },
       scrollBehavior: GlowOnlyScrollBehavior(),
       home: const SplashScreen(),
     );
