@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status, Depends, Query, HTTPException
 from typing import Optional
 
-from ..schemas.patient_schema import PatientCreate
+from ..schemas.patient_schema import PatientCreate, PatientUpdate
 from ..services import patient_service
 from ..utils.security import get_current_user
 from ..models.user import Photographer
@@ -42,6 +42,17 @@ async def get_completed_patients(current_user: Photographer = Depends(get_curren
 async def get_patient(patient_id: str):
     patient = await patient_service.get_patient(patient_id)
     return {"success": True, "data": patient}
+
+
+@router.patch("/{patient_id}")
+async def update_patient_basic_info(patient_id: str, payload: PatientUpdate):
+    updated = await patient_service.update_patient(
+        patient_id=patient_id,
+        name=payload.name,
+        phone=payload.phone,
+        address=payload.address,
+    )
+    return {"success": True, "data": updated}
 
 
 @router.delete("/{patient_id}")

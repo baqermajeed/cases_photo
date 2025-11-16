@@ -27,7 +27,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
   Patient? _patient;
   bool _isLoading = true;
   bool _dirty = false;
-  int _selectedPhase = 1; // 1=قبل, 2=أثناء, 3=بعد
+  int _selectedPhase = 1; // 1=قبل, 2=أثناء, 3=بعد, 4=المعالجة
 
   @override
   void initState() {
@@ -336,6 +336,14 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               ),
             ),
             centerTitle: true,
+            actions: [
+              if (!_isLoading && _patient != null)
+                IconButton(
+                  tooltip: 'تعديل بيانات المريض',
+                  onPressed: _openEditPatientDialog,
+                  icon: const Icon(Icons.edit_rounded),
+                ),
+            ],
           ),
           body: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -449,15 +457,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: LinearProgressIndicator(
-                        value: progress / 100,
-                        minHeight: 8,
-                        backgroundColor: Colors.grey.shade200,
-                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF5BA8D0)),
-                      ),
-                    ),
+                    _PhasedProgressBar(patient: p),
                   ],
                 ),
               ),
@@ -532,6 +532,15 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
             () => setState(() => _selectedPhase = 3),
           ),
         ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildButton(
+            'المعالجة',
+            _selectedPhase == 4 ? const Color(0xFF5BA8D0) : Colors.white,
+            _selectedPhase == 4 ? Colors.white : Colors.grey.shade800,
+            () => setState(() => _selectedPhase = 4),
+          ),
+        ),
       ],
     );
   }
@@ -567,8 +576,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
       stepNumbers = [1, 2, 3, 4, 5, 6, 7, 8];
     } else if (_selectedPhase == 2) {
       stepNumbers = [9, 10, 11, 12, 13, 14];
-    } else {
+    } else if (_selectedPhase == 3) {
       stepNumbers = [15, 16, 17, 18, 19, 20, 21, 22];
+    } else {
+      stepNumbers = [23]; // مرحلة المعالجة
     }
 
     final steps = _patient!.steps.where((s) => stepNumbers.contains(s.stepNumber)).toList();
@@ -759,4 +770,172 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     } catch (_) {}
   }
 
+  Future<void> _openEditPatientDialog() async {
+    if (_patient == null) return;
+    final nameController = TextEditingController(text: _patient!.name);
+    final phoneController = TextEditingController(text: _patient!.phone);
+    final addressController = TextEditingController(text: _patient!.address);
+    final formKey = GlobalKey<FormState>();
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('تعديل بيانات المريض'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'الاسم'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'الاسم مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: phoneController,
+                    decoration: const InputDecoration(labelText: 'رقم الهاتف'),
+                    keyboardType: TextInputType.phone,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'رقم الهاتف مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: addressController,
+                    decoration: const InputDecoration(labelText: 'العنوان'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'العنوان مطلوب' : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+                Navigator.pop(context, true);
+              },
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (saved == true) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      final result = await _patientService.updatePatient(
+        id: _patient!.id,
+        name: nameController.text.trim(),
+        phone: phoneController.text.trim(),
+        address: addressController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      if (result['success'] == true) {
+        final updated = result['patient'] as Patient;
+        setState(() {
+          _patient = updated;
+          _dirty = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم تحديث بيانات المريض'), backgroundColor: Color(0xFF10B981)),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['message'] ?? 'فشل في تحديث البيانات')),
+        );
+      }
+    }
+  }
+}
+
+class _PhasedProgressBar extends StatelessWidget {
+  final Patient patient;
+  const _PhasedProgressBar({required this.patient});
+
+  double _phaseProgress(int phase) {
+    List<int> steps;
+    if (phase == 1) {
+      steps = [1, 2, 3, 4, 5, 6, 7, 8];
+    } else if (phase == 2) {
+      steps = [9, 10, 11, 12, 13, 14];
+    } else if (phase == 3) {
+      steps = [15, 16, 17, 18, 19, 20, 21, 22];
+    } else {
+      steps = [23];
+    }
+    final phaseSteps = patient.steps.where((s) => steps.contains(s.stepNumber)).toList();
+    if (phaseSteps.isEmpty) return 0.0;
+    final done = phaseSteps.where((s) => s.isDone).length;
+    return done / phaseSteps.length;
+  }
+
+  Color _phaseColor(int phase) {
+    switch (phase) {
+      case 1:
+        return const Color(0xFF3B82F6); // أزرق
+      case 2:
+        return const Color(0xFFF59E0B); // برتقالي
+      case 3:
+        return const Color(0xFF10B981); // أخضر
+      case 4:
+      default:
+        return const Color(0xFF8B5CF6); // بنفسجي
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 10,
+      child: Row(
+        children: List.generate(4, (i) {
+          final phase = i + 1;
+          final progress = _phaseProgress(phase);
+          final color = _phaseColor(phase);
+          return Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final clamped = progress.clamp(0.0, 1.0);
+                final filledWidth = constraints.maxWidth * clamped;
+                return Container(
+                  margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: filledWidth,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          );
+        }),
+      ),
+    );
+  }
 }

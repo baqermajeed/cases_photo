@@ -493,41 +493,7 @@ class _PatientCard extends StatelessWidget {
                       // شريط التقدم
                       Row(
                         children: [
-                          Expanded(
-                            child: Stack(
-                              children: [
-                                Container(
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade200,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                FractionallySizedBox(
-                                  widthFactor: progress / 100,
-                                  child: Container(
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        colors: [
-                                          AppTheme.successGreen,
-                                          Color(0xFF10B981),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(10),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: AppTheme.successGreen.withOpacity(0.3),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                          Expanded(child: _PhasedProgressBar(patient: patient)),
                           const SizedBox(width: 10),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -567,8 +533,8 @@ class _PatientCard extends StatelessWidget {
                           const SizedBox(width: 16),
                           Icon(Icons.check_circle_outline, size: 12, color: Colors.grey.shade500),
                           const SizedBox(width: 4),
-                          Text(
-                            '${patient.completedStepsCount}/22',
+                      Text(
+                        '${patient.completedStepsCount}/${patient.steps.length}',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey.shade600,
@@ -594,6 +560,87 @@ class _PatientCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PhasedProgressBar extends StatelessWidget {
+  final Patient patient;
+  const _PhasedProgressBar({required this.patient});
+
+  double _phaseProgress(int phase) {
+    List<int> steps;
+    if (phase == 1) {
+      steps = [1, 2, 3, 4, 5, 6, 7, 8];
+    } else if (phase == 2) {
+      steps = [9, 10, 11, 12, 13, 14];
+    } else if (phase == 3) {
+      steps = [15, 16, 17, 18, 19, 20, 21, 22];
+    } else {
+      steps = [23];
+    }
+    final phaseSteps = patient.steps.where((s) => steps.contains(s.stepNumber)).toList();
+    if (phaseSteps.isEmpty) return 0.0;
+    final done = phaseSteps.where((s) => s.isDone).length;
+    return done / phaseSteps.length;
+  }
+
+  Color _phaseColor(int phase) {
+    switch (phase) {
+      case 1:
+        return const Color(0xFF3B82F6); // أزرق
+      case 2:
+        return const Color(0xFFF59E0B); // برتقالي
+      case 3:
+        return const Color(0xFF10B981); // أخضر
+      case 4:
+      default:
+        return const Color(0xFF8B5CF6); // بنفسجي
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 8,
+      child: Row(
+        children: List.generate(4, (i) {
+          final phase = i + 1;
+          final progress = _phaseProgress(phase);
+          final color = _phaseColor(phase);
+          return Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final clamped = progress.clamp(0.0, 1.0);
+                final filledWidth = constraints.maxWidth * clamped;
+                return Container(
+                  margin: EdgeInsets.only(right: i < 3 ? 3 : 0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Stack(
+                    children: [
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: filledWidth,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          );
+        }),
       ),
     );
   }
