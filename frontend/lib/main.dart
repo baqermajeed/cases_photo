@@ -5,6 +5,7 @@ import 'core/theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/patients_list_screen.dart';
 import 'services/auth_service.dart';
+import 'core/network/connectivity_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,6 +19,11 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
+  // Init connectivity watcher
+  ConnectivityService.instance.init();
+  // Load token and attach to Dio (keeps session across weak/offline)
+  await AuthService().loadToken();
+  await AuthService().attachTokenToDio();
   
   runApp(const FarahDentApp());
 }

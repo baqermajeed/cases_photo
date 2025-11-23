@@ -1,5 +1,6 @@
 from fastapi import APIRouter, status, Depends, Query, HTTPException
 from typing import Optional
+from datetime import datetime
 
 from ..schemas.patient_schema import PatientCreate, PatientUpdate
 from ..services import patient_service
@@ -16,8 +17,19 @@ async def create_patient(payload: PatientCreate):
 
 
 @router.get("")
-async def list_patients(q: Optional[str] = Query(default=None), page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
-    result = await patient_service.search_patients(q=q, page=page, limit=limit)
+async def list_patients(
+    q: Optional[str] = Query(default=None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    since: Optional[str] = Query(default=None, description="ISO8601 timestamp to fetch only changed records since"),
+):
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+        except Exception:
+            since_dt = None
+    result = await patient_service.search_patients(q=q, page=page, limit=limit, since=since_dt)
     return {"success": True, **result}
 
 

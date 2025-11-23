@@ -1,151 +1,71 @@
-import 'dart:convert';
 import 'dart:async';
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
-import '../core/constants/api_constants.dart';
-import '../models/patient.dart';
-import 'auth_service.dart';
+import '../models/patient.dart' as domain;
+import '../core/network/connectivity_service.dart';
+import '../data/local/app_database.dart';
+import '../data/remote/patient_api.dart';
+import '../data/repositories/patient_repository.dart';
 
 class PatientService {
-  final AuthService authService = AuthService();
-  static const Duration _timeout = Duration(seconds: 12);
+  final PatientRepository _repo = PatientRepository(
+    db: AppDatabase(),
+    api: PatientApi(),
+  );
+  final ConnectivityService _net = ConnectivityService.instance;
 
-  // Get all patients with search and pagination
+  // Offline-first: read from Drift immediately, then sync in background
   Future<Map<String, dynamic>> getPatients({
     String? query,
     int page = 1,
     int limit = 1000,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
+    final local = await _repo.getLocalPatients(query: query);
+    // background sync
+    () async {
+      final online = await _net.isOnline();
+      if (online) {
+        await _repo.updateLocalFromNetwork(query: query);
       }
-
-      String url = '${ApiConstants.baseUrl}${ApiConstants.patients}?page=$page&limit=$limit';
-      if (query != null && query.isNotEmpty) {
-        final q = Uri.encodeQueryComponent(query);
-        url += '&q=$q';
-      }
-
-      final response = await http
-          .get(
-            Uri.parse(url),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final patients = (data['data'] as List)
-            .map((e) => Patient.fromJson(e))
-            .toList();
-
-        return {
-          'success': true,
-          'patients': patients,
-          'pagination': data['pagination'],
-        };
-      } else {
-        String msg = 'فشل في جلب البيانات';
-        try {
-          final err = jsonDecode(utf8.decode(response.bodyBytes));
-          msg = err['detail']?.toString() ?? err['message']?.toString() ?? msg;
-        } catch (_) {}
-        if (response.statusCode == 401) {
-          msg = 'انتهت جلسة الدخول. يرجى تسجيل الدخول مجدداً.';
-        }
-        return {'success': false, 'message': msg, 'status': response.statusCode};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
-    }
+    }();
+    return {
+      'success': true,
+      'patients': local,
+      'pagination': null,
+    };
   }
 
-  // Fetch all patients across all pages (unlimited)
+  // Fetch all patients across pages (not needed with Drift cache)
   Future<Map<String, dynamic>> getAllPatients({String? query}) async {
-    final List<Patient> allPatients = [];
-    int page = 1;
-    // start conservatively; some backends cap limit (e.g., <=100)
-    int pageSize = 100;
-
-    while (true) {
-      Map<String, dynamic> result = await getPatients(query: query, page: page, limit: pageSize);
-      if (result['success'] != true) {
-        // If server rejects the limit, fallback to smaller page sizes
-        final msg = (result['message'] ?? '').toString().toLowerCase();
-        if (msg.contains('limit') || msg.contains('le') || msg.contains('less') || msg.contains('type')) {
-          if (pageSize > 50) {
-            pageSize = 50;
-            result = await getPatients(query: query, page: page, limit: pageSize);
-          } else if (pageSize > 20) {
-            pageSize = 20;
-            result = await getPatients(query: query, page: page, limit: pageSize);
-          }
-        }
-        if (result['success'] != true) {
-          return result;
-        }
-      }
-      final batch = (result['patients'] as List<Patient>);
-      allPatients.addAll(batch);
-
-      // Try to infer if more pages exist from pagination or batch size
-      final pagination = result['pagination'];
-      bool hasMore;
-      if (pagination is Map<String, dynamic>) {
-        if (pagination['has_next'] is bool) {
-          hasMore = pagination['has_next'] == true;
-        } else if (pagination['page'] != null && pagination['total_pages'] != null) {
-          try {
-            final int current = (pagination['page'] as num).toInt();
-            final int total = (pagination['total_pages'] as num).toInt();
-            hasMore = current < total;
-          } catch (_) {
-            hasMore = batch.length == pageSize;
-          }
-        } else if (pagination['next_page'] != null) {
-          hasMore = pagination['next_page'] != null;
-        } else {
-          hasMore = batch.length == pageSize;
-        }
-      } else {
-        hasMore = batch.length == pageSize;
-      }
-
-      if (!hasMore) break;
-      page += 1;
-    }
-
-    return {'success': true, 'patients': allPatients};
+    return getPatients(query: query);
   }
 
   // Get patient by ID
-  Future<Patient?> getPatient(String id) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) return null;
-
-      final response = await http
-          .get(
-            Uri.parse('${ApiConstants.baseUrl}${ApiConstants.patientById(id)}'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return Patient.fromJson(data['data']);
+  Future<domain.Patient?> getPatient(String id) async {
+    final local = await _repo.getLocalPatients();
+    final p = local.firstWhere(
+      (e) => e.id == id,
+      orElse: () => domain.Patient(
+        id: '',
+        name: '',
+        phone: '',
+        address: '',
+        registrationDate: DateTime.now(),
+        steps: const [],
+      ),
+    );
+    if (p.id.isEmpty) return null;
+    // background refresh for this patient
+    () async {
+      final online = await _net.isOnline();
+      if (online) {
+        final api = PatientApi();
+        final fresh = await api.getPatient(id);
+        if (fresh != null) {
+          await _repo.savePatientsToLocal([fresh]);
+        }
       }
-      return null;
-    } on TimeoutException {
-      return null;
-    } catch (e) {
-      return null;
-    }
+    }();
+    return p;
   }
 
   // Create new patient
@@ -154,41 +74,11 @@ class PatientService {
     required String phone,
     required String address,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .post(
-            Uri.parse('${ApiConstants.baseUrl}${ApiConstants.patients}'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'name': name,
-              'phone': phone,
-              'address': address,
-            }),
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 201) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return {
-          'success': true,
-          'patient': Patient.fromJson(data['data']),
-        };
-      } else {
-        return {'success': false, 'message': 'فشل في إضافة المريض'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    return _repo.createPatient(name: name, phone: phone, address: address);
   }
 
   // Update patient basic info
@@ -198,38 +88,11 @@ class PatientService {
     required String phone,
     required String address,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .patch(
-            Uri.parse('${ApiConstants.baseUrl}${ApiConstants.patientById(id)}'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'name': name,
-              'phone': phone,
-              'address': address,
-            }),
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return {'success': true, 'patient': Patient.fromJson(data['data'])};
-      } else {
-        return {'success': false, 'message': 'فشل في تحديث بيانات المريض'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    return _repo.updatePatient(id: id, name: name, phone: phone, address: address);
   }
 
   // Upload images to a step
@@ -238,65 +101,20 @@ class PatientService {
     required int stepNumber,
     required List<XFile> images,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      var request = http.MultipartRequest(
-        'POST',
-        Uri.parse(
-            '${ApiConstants.baseUrl}${ApiConstants.uploadImages(patientId, stepNumber)}'),
-      );
-
-      request.headers['Authorization'] = 'Bearer $token';
-
-      // Add all images with proper content-type
-      String _extToMime(String path) {
-        final lower = path.toLowerCase();
-        if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-        if (lower.endsWith('.png')) return 'image/png';
-        if (lower.endsWith('.webp')) return 'image/webp';
-        if (lower.endsWith('.heic')) return 'image/heic';
-        if (lower.endsWith('.heif')) return 'image/heif';
-        return 'image/jpeg';
-      }
-
-      for (var image in images) {
-        final mime = _extToMime(image.path);
-        final mediaType = MediaType.parse(mime);
-        request.files.add(
-          await http.MultipartFile.fromPath('files', image.path, contentType: mediaType),
-        );
-      }
-
-      final streamedResponse = await request.send().timeout(_timeout);
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        Map<String, dynamic>? payload;
-        try {
-          payload = jsonDecode(utf8.decode(response.bodyBytes));
-        } catch (_) {}
-        return {
-          'success': true,
-          'message': payload?['message'] ?? 'تم رفع الصور بنجاح',
-          'data': payload?['data'], // قد تحتوي بيانات الخطوة
-        };
-      } else {
-        String msg = 'فشل في رفع الصور';
-        try {
-          final err = jsonDecode(utf8.decode(response.bodyBytes));
-          msg = err['detail']?.toString() ?? err['message']?.toString() ?? msg;
-        } catch (_) {}
-        return {'success': false, 'message': msg, 'status': response.statusCode};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال أثناء رفع الصور.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في رفع الصور: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    final api = PatientApi();
+    final res = await api.uploadImages(patientId: patientId, stepNumber: stepNumber, images: images);
+    if (res['success'] == true) {
+      // refresh patient data locally
+      final fresh = await api.getPatient(patientId);
+      if (fresh != null) {
+        await _repo.savePatientsToLocal([fresh]);
+      }
+    }
+    return res;
   }
 
   // Mark step as done
@@ -305,34 +123,17 @@ class PatientService {
     required int stepNumber,
     required bool isDone,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .patch(
-            Uri.parse(
-                '${ApiConstants.baseUrl}${ApiConstants.markStepDone(patientId, stepNumber)}'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'is_done': isDone}),
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        return {'success': true};
-      } else {
-        return {'success': false, 'message': 'فشل في تحديث الحالة'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    final api = PatientApi();
+    final res = await api.markStepDone(patientId: patientId, stepNumber: stepNumber, isDone: isDone);
+    if (res['success'] == true) {
+      // reflect locally
+      await _repo.db.markStepDoneLocal(patientId: patientId, stepNumber: stepNumber, isDone: isDone);
+    }
+    return res;
   }
 
   // Delete image
@@ -341,121 +142,50 @@ class PatientService {
     required int stepNumber,
     required String imageId,
   }) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .delete(
-            Uri.parse(
-                '${ApiConstants.baseUrl}${ApiConstants.deleteImage(patientId, stepNumber, imageId)}'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        return {'success': true, 'message': 'تم حذف الصورة'};
-      } else {
-        return {'success': false, 'message': 'فشل في حذف الصورة'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    final api = PatientApi();
+    final res = await api.deleteImage(patientId: patientId, stepNumber: stepNumber, imageId: imageId);
+    if (res['success'] == true) {
+      final fresh = await api.getPatient(patientId);
+      if (fresh != null) {
+        await _repo.savePatientsToLocal([fresh]);
+      }
+    }
+    return res;
   }
 
   // Get statistics (admin only)
   Future<Map<String, dynamic>> getStatistics() async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .get(
-            Uri.parse('${ApiConstants.baseUrl}/patients/stats/dashboard'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        return {
-          'success': true,
-          'data': data['data'],
-        };
-      } else {
-        return {'success': false, 'message': 'فشل في جلب الإحصائيات'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
-    }
+    final local = await _repo.getLocalPatients();
+    int total = local.length;
+    int completed = local.where((p) => p.progressPercentage >= 100).length;
+    int incomplete = total - completed;
+    return {
+      'success': true,
+      'data': {
+        'total_patients': total,
+        'completed_patients': completed,
+        'incomplete_patients': incomplete,
+      },
+    };
   }
 
   // Get completed patients (admin only)
   Future<Map<String, dynamic>> getCompletedPatients() async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .get(
-            Uri.parse('${ApiConstants.baseUrl}/patients/filter/completed'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final patients = (data['data'] as List)
-            .map((e) => Patient.fromJson(e))
-            .toList();
-        return {
-          'success': true,
-          'patients': patients,
-        };
-      } else {
-        return {'success': false, 'message': 'فشل في جلب البيانات'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
-    }
+    final local = await _repo.getLocalPatients();
+    final completed = local.where((p) => p.progressPercentage >= 100).toList();
+    return {'success': true, 'patients': completed};
   }
 
   // Delete patient (admin only)
   Future<Map<String, dynamic>> deletePatient(String patientId) async {
-    try {
-      final token = await authService.getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'غير مسجل الدخول'};
-      }
-
-      final response = await http
-          .delete(
-            Uri.parse('${ApiConstants.baseUrl}${ApiConstants.patientById(patientId)}'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        return {'success': true, 'message': 'تم حذف المريض بنجاح'};
-      } else {
-        return {'success': false, 'message': 'فشل في حذف المريض'};
-      }
-    } on TimeoutException {
-      return {'success': false, 'message': 'انتهت مهلة الاتصال. تحقق من الشبكة.'};
-    } catch (e) {
-      return {'success': false, 'message': 'خطأ في الاتصال: $e'};
+    final online = await _net.isOnline();
+    if (!online) {
+      return {'success': false, 'message': 'لا يمكن تنفيذ العملية بدون اتصال بالإنترنت'};
     }
+    return _repo.deletePatient(patientId);
   }
 }

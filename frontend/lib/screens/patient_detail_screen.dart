@@ -392,7 +392,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildInfoRow('الاسم', p.name, const Color(0xFF5BA8D0)),
+                    _buildInfoRow('الاسم', p.name, const Color(0xFF5BA8D0), valueFontSize: 16, labelFontSize: 16),
                     const SizedBox(height: 14),
                     _buildInfoRow('رقم الهاتف', p.phone, Colors.grey.shade700),
                     const SizedBox(height: 14),
@@ -407,8 +407,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               const SizedBox(width: 16),
               // الصورة على اليمين
               Container(
-                width: 130,
-                height: 160,
+                width: 120,
+                height: 155,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   color: avatarUrl == null ? Colors.grey.shade200 : null,
@@ -419,13 +419,13 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                         borderRadius: BorderRadius.circular(12),
                         child: CachedNetworkImage(
                           imageUrl: avatarUrl,
-                          width: 130,
-                          height: 160,
+                          width: 120,
+                          height: 155,
                           fit: BoxFit.cover,
-                          memCacheHeight: 320,  // ضعف الحجم للشاشات عالية الدقة
-                          memCacheWidth: 260,
-                          maxHeightDiskCache: 400,
-                          maxWidthDiskCache: 320,
+                          memCacheHeight: 310,
+                          memCacheWidth: 240,
+                          maxHeightDiskCache: 360,
+                          maxWidthDiskCache: 280,
                           placeholder: (context, url) => Container(
                             color: Colors.grey.shade200,
                             child: const Center(child: CircularProgressIndicator()),
@@ -451,7 +451,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                     Text(
                       'التقدم العام',
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: Colors.grey.shade700,
                       ),
@@ -465,7 +465,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               Text(
                 '${progress.toStringAsFixed(0)}%',
                 style: const TextStyle(
-                  fontSize: 18,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF5BA8D0),
                 ),
@@ -477,14 +477,14 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, Color labelColor) {
+  Widget _buildInfoRow(String label, String value, Color labelColor, {double valueFontSize = 12, double labelFontSize = 12}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '$label : ',
           style: TextStyle(
-            fontSize: 15,
+            fontSize: labelFontSize,
             color: labelColor,
             fontWeight: FontWeight.w600,
           ),
@@ -493,7 +493,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
           child: Text(
             value,
             style: TextStyle(
-              fontSize: 15,
+              fontSize: valueFontSize,
               color: Colors.grey.shade800,
               fontWeight: FontWeight.w500,
             ),

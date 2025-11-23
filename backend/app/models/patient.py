@@ -9,6 +9,8 @@ class Image(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     url: str
     uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    deleted: bool = False
 
 
 class Step(BaseModel):
@@ -18,6 +20,8 @@ class Step(BaseModel):
     description: Optional[str] = None
     images: List[Image] = Field(default_factory=list)
     is_done: bool = False
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    deleted: bool = False
 
 
 class Patient(Document):
@@ -26,6 +30,8 @@ class Patient(Document):
     address: str
     registration_date: datetime = Field(default_factory=datetime.utcnow)
     steps: List[Step] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    deleted: bool = False
 
     class Settings:
         name = "patients"

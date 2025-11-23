@@ -67,6 +67,13 @@ dependencies:
   
   # Path provider
   path_provider: ^2.1.2
+  # Connectivity status
+  connectivity_plus: ^6.0.3
+  # Drift (local database)
+  drift: ^2.18.0
+  drift_sqflite: ^2.0.1
+  # Shared preferences for token persistence
+  shared_preferences: ^2.2.3
   
   # Permission handler
   permission_handler: ^11.2.0
@@ -80,6 +87,9 @@ dev_dependencies:
 
   # App icon generator
   flutter_launcher_icons: ^0.13.1
+  # Code generation for Drift
+  build_runner: ^2.4.9
+  drift_dev: ^2.18.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
