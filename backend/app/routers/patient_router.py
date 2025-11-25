@@ -1,6 +1,5 @@
 from fastapi import APIRouter, status, Depends, Query, HTTPException
 from typing import Optional
-from datetime import datetime
 
 from ..schemas.patient_schema import PatientCreate, PatientUpdate
 from ..services import patient_service
@@ -17,36 +16,33 @@ async def create_patient(payload: PatientCreate):
 
 
 @router.get("")
-async def list_patients(
-    q: Optional[str] = Query(default=None),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    since: Optional[str] = Query(default=None, description="ISO8601 timestamp to fetch only changed records since"),
-):
-    since_dt = None
-    if since:
-        try:
-            since_dt = datetime.fromisoformat(since)
-        except Exception:
-            since_dt = None
-    result = await patient_service.search_patients(q=q, page=page, limit=limit, since=since_dt)
+async def list_patients(q: Optional[str] = Query(default=None), page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
+    result = await patient_service.search_patients(q=q, page=page, limit=limit)
     return {"success": True, **result}
 
 
 # هذه الـ routes لازم تكون قبل /{patient_id}
 @router.get("/stats/dashboard")
-async def get_stats(current_user: Photographer = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+async def get_stats():
     stats = await patient_service.get_statistics()
     return {"success": True, "data": stats}
 
 
 @router.get("/filter/completed")
-async def get_completed_patients(current_user: Photographer = Depends(get_current_user)):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+async def get_completed_patients():
     patients = await patient_service.get_completed_patients()
+    return {"success": True, "data": patients}
+
+
+@router.get("/filter/completed/phase/{phase}")
+async def get_completed_by_phase(phase: int = Query(..., ge=1, le=4)):
+    patients = await patient_service.get_patients_completed_phase(phase)
+    return {"success": True, "data": patients}
+
+
+@router.get("/filter/zero-step")
+async def get_zero_step_patients():
+    patients = await patient_service.get_zero_step_patients()
     return {"success": True, "data": patients}
 
 
@@ -63,6 +59,7 @@ async def update_patient_basic_info(patient_id: str, payload: PatientUpdate):
         name=payload.name,
         phone=payload.phone,
         address=payload.address,
+        note=payload.note,
     )
     return {"success": True, "data": updated}
 

@@ -1,6 +1,5 @@
 from typing import List, Optional, Tuple
 from fastapi import HTTPException
-from datetime import datetime
 
 from ..models.patient import Patient, Step, Image
 from ..schemas.patient_schema import PatientCreate
@@ -29,7 +28,9 @@ STEP_TITLES: List[str] = [
     "اللهاة العلوية",
     "اللهاة السفلية",
     "صورة وجه كامل",
-    "صورة المعالجة",
+    "صورة اشعة سنسر pa و اشعة التركيب",  # step 23 (after operation)
+    "صورة المعالجة",  # step 24 (treatment)
+    "صورة Emergency profile",  # step 25 (after operation - new)
 ]
 
 
@@ -45,8 +46,8 @@ async def create_patient(data: PatientCreate) -> Patient:
         name=data.name,
         phone=data.phone,
         address=data.address,
+        note=data.note,
         steps=generate_default_steps(),
-        updated_at=datetime.utcnow(),
     )
     await patient.insert()
     return patient
@@ -56,33 +57,53 @@ async def list_patients() -> List[Patient]:
     return await Patient.find_all().to_list()
 
 
-async def search_patients(q: Optional[str], page: int, limit: int, since: Optional[datetime] = None) -> dict:
+def _phase_steps(phase: int) -> List[int]:
+    if phase == 1:
+        return [1, 2, 3, 4, 5, 6, 7, 8]
+    if phase == 2:
+        return [9, 10, 11, 12, 13, 14]
+    if phase == 3:
+        # treatment
+        return [24]
+    if phase == 4:
+        # after operation (includes newly added 25)
+        return [15, 16, 17, 18, 19, 20, 21, 22, 23, 25]
+    raise HTTPException(status_code=400, detail="Invalid phase")
+
+
+def _is_phase_completed(patient: Patient, phase: int) -> bool:
+    required = set(_phase_steps(phase))
+    step_map = {s.step_number: s for s in patient.steps}
+    # All required steps must exist and be done
+    for sn in required:
+        step = step_map.get(sn)
+        if step is None or not step.is_done:
+            return False
+    return True
+
+
+def _has_zero_steps_done(patient: Patient) -> bool:
+    return not any(s.is_done for s in patient.steps)
+
+
+async def search_patients(q: Optional[str], page: int, limit: int) -> dict:
     skip = (page - 1) * limit
-    base_filter = {"deleted": {"$ne": True}}
-    and_filters: List[dict] = []
     if q:
-        and_filters.append({
+        filter_query = {
             "$or": [
                 {"name": {"$regex": q, "$options": "i"}},
                 {"phone": {"$regex": q, "$options": "i"}},
             ]
-        })
-    if since:
-        and_filters.append({"updated_at": {"$gte": since}})
-    filter_query = base_filter if not and_filters else {"$and": [base_filter, *and_filters]}
-
-    cursor = Patient.find(filter_query)
-    total = await Patient.find(filter_query).count()
+        }
+        cursor = Patient.find(filter_query)
+        total = await Patient.find(filter_query).count()
+    else:
+        cursor = Patient.find_all()
+        total = await Patient.find_all().count()
 
     patients = await cursor.skip(skip).limit(limit).to_list()
 
     pages = (total + limit - 1) // limit if total else 0
-    latest_updated_at = None
-    if patients:
-        try:
-            latest_updated_at = max(p.updated_at for p in patients if getattr(p, "updated_at", None) is not None)
-        except ValueError:
-            latest_updated_at = None
     return {
         "data": patients,
         "pagination": {
@@ -92,7 +113,6 @@ async def search_patients(q: Optional[str], page: int, limit: int, since: Option
             "pages": pages,
         },
         "query": q,
-        "latest_updated_at": latest_updated_at.isoformat() if latest_updated_at else None,
     }
 
 
@@ -103,13 +123,14 @@ async def get_patient(patient_id: str) -> Patient:
     return patient
 
 
-async def update_patient(patient_id: str, name: str, phone: str, address: str) -> Patient:
+async def update_patient(patient_id: str, name: str, phone: str, address: str, note: Optional[str] = None) -> Patient:
     """تحديث بيانات المريض الأساسية"""
     patient = await get_patient(patient_id)
     patient.name = name
     patient.phone = phone
     patient.address = address
-    patient.updated_at = datetime.utcnow()
+    if note is not None:
+        patient.note = note
     await patient.save()
     return patient
 
@@ -125,8 +146,6 @@ async def mark_step_done(patient_id: str, step_number: int, is_done: bool = True
     patient = await get_patient(patient_id)
     step = get_step(patient, step_number)
     step.is_done = is_done
-    step.updated_at = datetime.utcnow()
-    patient.updated_at = datetime.utcnow()
     await patient.save()
     return patient
 
@@ -135,8 +154,6 @@ async def add_images_to_step(patient_id: str, step_number: int, images: List[Ima
     patient = await get_patient(patient_id)
     step = get_step(patient, step_number)
     step.images.extend(images)
-    step.updated_at = datetime.utcnow()
-    patient.updated_at = datetime.utcnow()
     await patient.save()
     return patient
 
@@ -148,49 +165,76 @@ async def delete_image_from_step(patient_id: str, step_number: int, image_id: st
     step.images = [img for img in step.images if img.id != image_id]
     if len(step.images) == before:
         raise HTTPException(status_code=404, detail="Image not found")
-    step.updated_at = datetime.utcnow()
-    patient.updated_at = datetime.utcnow()
     await patient.save()
     return patient
 
 
 async def get_statistics() -> dict:
     """جلب إحصائيات المرضى"""
-    all_patients = await Patient.find({"deleted": {"$ne": True}}).to_list()
+    all_patients = await Patient.find_all().to_list()
     total = len(all_patients)
-    
-    completed = 0
-    incomplete = 0
-    
+
+    completed_total = 0
+    incomplete_total = 0
+    zero_step_total = 0
+
+    # Phase completion counters
+    phase_completed = {1: 0, 2: 0, 3: 0, 4: 0}
+
     for patient in all_patients:
-        all_steps_done = all(step.is_done for step in patient.steps if not getattr(step, "deleted", False))
+        all_steps_done = all(step.is_done for step in patient.steps)
         if all_steps_done:
-            completed += 1
+            completed_total += 1
         else:
-            incomplete += 1
-    
+            incomplete_total += 1
+
+        if _has_zero_steps_done(patient):
+            zero_step_total += 1
+
+        for phase in (1, 2, 3, 4):
+            if _is_phase_completed(patient, phase):
+                phase_completed[phase] += 1
+
     return {
         "total_patients": total,
-        "completed_patients": completed,
-        "incomplete_patients": incomplete,
+        "completed_patients": completed_total,
+        "incomplete_patients": incomplete_total,
+        "zero_step_patients": zero_step_total,
+        "phase_completed": phase_completed,
     }
 
 
 async def get_completed_patients() -> List[Patient]:
     """جلب فقط المرضى المكتملين"""
-    all_patients = await Patient.find({"deleted": {"$ne": True}}).to_list()
+    all_patients = await Patient.find_all().to_list()
     completed_patients = []
     
     for patient in all_patients:
-        if all(step.is_done for step in patient.steps if not getattr(step, "deleted", False)):
+        if all(step.is_done for step in patient.steps):
             completed_patients.append(patient)
     
     return completed_patients
 
 
 async def delete_patient(patient_id: str) -> None:
-    """حذف مريض - soft delete"""
+    """حذف مريض"""
     patient = await get_patient(patient_id)
-    patient.deleted = True
-    patient.updated_at = datetime.utcnow()
-    await patient.save()
+    await patient.delete()
+
+
+# ========== Phase/Zero-step filters ==========
+
+async def get_patients_completed_phase(phase: int) -> List[Patient]:
+    """جلب المرضى الذين أتمّوا المرحلة المحددة (كل خطوات المرحلة مكتملة)"""
+    all_patients = await Patient.find_all().to_list()
+    result: List[Patient] = []
+    for patient in all_patients:
+        if _is_phase_completed(patient, phase):
+            result.append(patient)
+    return result
+
+
+async def get_zero_step_patients() -> List[Patient]:
+    """المرضى الذين لم يكملوا أي خطوة"""
+    all_patients = await Patient.find_all().to_list()
+    return [p for p in all_patients if _has_zero_steps_done(p)]

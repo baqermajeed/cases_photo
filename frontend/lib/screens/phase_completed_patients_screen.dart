@@ -1,0 +1,187 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' as intl;
+import 'package:cached_network_image/cached_network_image.dart';
+import '../core/theme/app_theme.dart';
+import '../models/patient.dart';
+import '../services/patient_service.dart';
+import 'patient_detail_screen.dart';
+
+class PhaseCompletedPatientsScreen extends StatefulWidget {
+  final int phase; // 1..4
+  const PhaseCompletedPatientsScreen({super.key, required this.phase});
+
+  @override
+  State<PhaseCompletedPatientsScreen> createState() => _PhaseCompletedPatientsScreenState();
+}
+
+class _PhaseCompletedPatientsScreenState extends State<PhaseCompletedPatientsScreen> {
+  final _patientService = PatientService();
+  List<Patient> _patients = [];
+  bool _isLoading = false;
+
+  String get _title {
+    switch (widget.phase) {
+      case 1:
+        return 'المرحلة: قبل العملية (مكتملين)';
+      case 2:
+        return 'المرحلة: أثناء العملية (مكتملين)';
+      case 3:
+        return 'المرحلة: المعالجة (مكتملين)';
+      case 4:
+      default:
+        return 'المرحلة: بعد العملية (مكتملين)';
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPatients();
+  }
+
+  Future<void> _loadPatients() async {
+    setState(() => _isLoading = true);
+    final result = await _patientService.getCompletedByPhase(widget.phase);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      if (result['success'] == true) {
+        _patients = (result['patients'] as List<Patient>).toList();
+      }
+    });
+    if (result['success'] != true && result['message'] != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message']), backgroundColor: AppTheme.errorRed),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_title),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_forward_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadPatients,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _patients.length,
+                  itemBuilder: (context, index) {
+                    final patient = _patients[index];
+                    return _Row(
+                      patient: patient,
+                      onTap: () async {
+                        final updated = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PatientDetailScreen(patientId: patient.id),
+                          ),
+                        );
+                        if (updated is Patient) {
+                          setState(() {
+                            final i = _patients.indexWhere((p) => p.id == updated.id);
+                            if (i != -1) _patients[i] = updated;
+                          });
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _Row extends StatelessWidget {
+  final Patient patient;
+  final VoidCallback onTap;
+  const _Row({required this.patient, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    String? avatarUrl;
+    try {
+      final step1 = patient.steps.firstWhere((s) => s.stepNumber == 1);
+      if (step1.images.isNotEmpty) avatarUrl = step1.images.first.url;
+    } catch (_) {}
+    final dateFormat = intl.DateFormat('dd/MM/yyyy', 'ar');
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 72,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: AppTheme.primaryBlue.withOpacity(0.06),
+                ),
+                child: avatarUrl == null
+                    ? const Icon(Icons.person, color: AppTheme.primaryBlue)
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: CachedNetworkImage(
+                          imageUrl: avatarUrl,
+                          width: 56,
+                          height: 72,
+                          fit: BoxFit.cover,
+                          memCacheHeight: 144,
+                          memCacheWidth: 112,
+                          maxHeightDiskCache: 180,
+                          maxWidthDiskCache: 140,
+                          placeholder: (context, url) => Container(
+                            color: AppTheme.primaryBlue.withOpacity(0.06),
+                            child: const Center(
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => const Icon(
+                            Icons.person,
+                            color: AppTheme.primaryBlue,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(patient.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(dateFormat.format(patient.registrationDate),
+                        style: TextStyle(color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.grey),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+

@@ -1,82 +1,87 @@
-import 'dart:async';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
-import '../core/network/dio_client.dart';
-import '../core/network/error_handler.dart';
-import '../core/network/token_store.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../core/constants/api_constants.dart';
 import '../models/user.dart';
+import 'dio_client.dart';
+import 'network_checker.dart';
 
 class AuthService {
-  static const String tokenKey = 'auth_token';
+  final storage = const FlutterSecureStorage();
+  static const tokenKey = 'auth_token';
 
-  // Login
+  Future<String?> getToken() async {
+    return await storage.read(key: tokenKey);
+  }
+
+  Future<bool> isLoggedIn() async {
+    final token = await storage.read(key: tokenKey);
+    return token != null && token.isNotEmpty;
+  }
+
+  Future<void> logout() async {
+    await storage.delete(key: tokenKey);
+  }
+
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
-      final res = await DioClient.instance.post<Map<String, dynamic>>(
-        '/auth/login',
-        headers: {'Content-Type': 'application/json'},
-        data: {'username': username, 'password': password},
+      // Check internet first
+      if (!await NetworkChecker.hasInternet()) {
+        return {'success': false, 'message': 'لا يوجد اتصال بالإنترنت'};
+      }
+
+      final response = await DioClient.dio.post(
+        '${ApiConstants.baseUrl}${ApiConstants.login}',
+        data: {
+          'username': username,
+          'password': password,
+        },
       );
-      final data = res.data!;
-      final token = data['access_token'] as String;
-      await saveToken(token);
-      await attachTokenToDio();
+
+      final data = response.data;
+      final token = data['access_token'];
+
+      await storage.write(key: tokenKey, value: token);
+
       final user = User.fromJson(data['user']);
-      return {'success': true, 'user': user, 'token': token};
+
+      return {
+        'success': true,
+        'user': user,
+        'token': token,
+      };
     } on DioException catch (e) {
-      return {'success': false, 'message': e.message ?? 'حدث خطأ في تسجيل الدخول'};
-    } catch (e) {
-      return {'success': false, 'message': ErrorHandler.toMessage(e)};
+      if (e.response?.statusCode == 401) {
+        return {'success': false, 'message': 'اسم المستخدم أو كلمة المرور غير صحيحة'};
+      }
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.unknown) {
+        return {'success': false, 'message': 'تعذر الاتصال بالخادم. تحقق من الإنترنت ثم أعد المحاولة'};
+      }
+      final serverMessage = (e.response?.data is Map<String, dynamic>)
+          ? (e.response?.data['detail']?.toString())
+          : null;
+      return {'success': false, 'message': serverMessage ?? 'حدث خطأ غير متوقع'};
+    } catch (_) {
+      return {'success': false, 'message': 'حدث خطأ غير متوقع'};
     }
   }
 
-  // Get current user
   Future<User?> getCurrentUser() async {
     try {
-      await attachTokenToDio();
-      final res = await DioClient.instance.get<Map<String, dynamic>>('/auth/me');
-      return User.fromJson(res.data!['user']);
+      final token = await storage.read(key: tokenKey);
+      if (token == null) return null;
+
+      final response = await DioClient.dio.get(
+        '${ApiConstants.baseUrl}${ApiConstants.me}',
+        options: Options(headers: {
+          'Authorization': 'Bearer $token',
+        }),
+      );
+
+      return User.fromJson(response.data['user']);
     } catch (_) {
       return null;
     }
-  }
-
-  // Get token
-  Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(tokenKey);
-  }
-
-  // Logout
-  Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(tokenKey);
-    TokenStore.setToken(null);
-  }
-
-  // Check if user is logged in
-  Future<bool> isLoggedIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(tokenKey);
-    return token != null;
-  }
-
-  Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(tokenKey, token);
-    TokenStore.setToken(token);
-  }
-
-  Future<void> loadToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(tokenKey);
-    TokenStore.setToken(token);
-  }
-
-  Future<void> attachTokenToDio() async {
-    if (TokenStore.token == null) {
-      await loadToken();
-    }
-    // TokenInterceptor سيضيف الـ header تلقائياً من TokenStore
   }
 }

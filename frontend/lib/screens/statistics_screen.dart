@@ -4,6 +4,8 @@ import '../services/patient_service.dart';
 import 'completed_patients_screen.dart';
 import 'all_patients_screen.dart';
 import 'incomplete_patients_screen.dart';
+import 'phase_completed_patients_screen.dart';
+import 'zero_step_patients_screen.dart';
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key});
@@ -18,6 +20,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   int _totalPatients = 0;
   int _completedPatients = 0;
   int _incompletePatients = 0;
+  int _zeroStepPatients = 0;
+  int _phase1Completed = 0;
+  int _phase2Completed = 0;
+  int _phase3Completed = 0;
+  int _phase4Completed = 0;
 
   @override
   void initState() {
@@ -36,6 +43,14 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           _totalPatients = data['total_patients'] ?? 0;
           _completedPatients = data['completed_patients'] ?? 0;
           _incompletePatients = data['incomplete_patients'] ?? 0;
+          _zeroStepPatients = data['zero_step_patients'] ?? 0;
+          try {
+            final pc = Map<String, dynamic>.from(data['phase_completed'] ?? {});
+            _phase1Completed = (pc['1'] ?? pc[1] ?? 0) as int;
+            _phase2Completed = (pc['2'] ?? pc[2] ?? 0) as int;
+            _phase3Completed = (pc['3'] ?? pc[3] ?? 0) as int;
+            _phase4Completed = (pc['4'] ?? pc[4] ?? 0) as int;
+          } catch (_) {}
         }
       });
 
@@ -197,10 +212,175 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                           );
                         },
                       ),
+                      const SizedBox(height: 16),
+
+                      // لم يكملوا أي خطوة
+                      _buildStatCard(
+                        icon: Icons.remove_done_rounded,
+                        title: 'لم يكملوا أي خطوة',
+                        value: _zeroStepPatients.toString(),
+                        color: Colors.redAccent,
+                        gradient: const LinearGradient(
+                          colors: [Colors.redAccent, Color(0xFFE53935)],
+                        ),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ZeroStepPatientsScreen()),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 24),
+
+                      const Text(
+                        'مكتملو المراحل',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // شبكة بطاقات المراحل (ارتفاع ثابت لتجنّب Overflow)
+                      GridView(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          mainAxisExtent: 96, // ارتفاع ثابت لكل بطاقة
+                        ),
+                        children: [
+                          _phaseCard(
+                            icon: Icons.filter_1_rounded,
+                            title: 'قبل العملية',
+                            value: _phase1Completed.toString(),
+                            color: const Color(0xFF3B82F6),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const PhaseCompletedPatientsScreen(phase: 1),
+                                ),
+                              );
+                            },
+                          ),
+                          _phaseCard(
+                            icon: Icons.filter_2_rounded,
+                            title: 'أثناء العملية',
+                            value: _phase2Completed.toString(),
+                            color: const Color(0xFFF59E0B),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const PhaseCompletedPatientsScreen(phase: 2),
+                                ),
+                              );
+                            },
+                          ),
+                          _phaseCard(
+                            icon: Icons.filter_3_rounded,
+                            title: 'المعالجة',
+                            value: _phase3Completed.toString(),
+                            color: const Color(0xFF8B5CF6),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const PhaseCompletedPatientsScreen(phase: 3),
+                                ),
+                              );
+                            },
+                          ),
+                          _phaseCard(
+                            icon: Icons.filter_4_rounded,
+                            title: 'بعد العملية',
+                            value: _phase4Completed.toString(),
+                            color: const Color(0xFF10B981),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const PhaseCompletedPatientsScreen(phase: 4),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _phaseCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color color,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+          border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }

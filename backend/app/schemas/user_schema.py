@@ -17,7 +17,3 @@ class UserPublic(BaseModel):
 class LoginResponse(BaseModel):
     success: bool
     user: UserPublic
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"

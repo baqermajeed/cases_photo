@@ -2,11 +2,13 @@ class PatientImage {
   final String id;
   final String url;
   final DateTime uploadedAt;
+  final String? uploadedByUsername;
 
   PatientImage({
     required this.id,
     required this.url,
     required this.uploadedAt,
+    this.uploadedByUsername,
   });
 
   factory PatientImage.fromJson(Map<String, dynamic> json) {
@@ -14,6 +16,7 @@ class PatientImage {
       id: json['id'] as String,
       url: json['url'] as String,
       uploadedAt: DateTime.parse(json['uploaded_at'] as String),
+      uploadedByUsername: json['uploaded_by_username'] as String?,
     );
   }
 
@@ -22,6 +25,7 @@ class PatientImage {
       'id': id,
       'url': url,
       'uploaded_at': uploadedAt.toIso8601String(),
+      'uploaded_by_username': uploadedByUsername,
     };
   }
 }
@@ -91,6 +95,7 @@ class Patient {
   final String name;
   final String phone;
   final String address;
+  final String? note;
   final DateTime registrationDate;
   final List<Step> steps;
 
@@ -99,6 +104,7 @@ class Patient {
     required this.name,
     required this.phone,
     required this.address,
+    this.note,
     required this.registrationDate,
     required this.steps,
   });
@@ -109,6 +115,7 @@ class Patient {
       name: json['name'] as String,
       phone: json['phone'] as String,
       address: json['address'] as String,
+      note: json['note'] as String?,
       registrationDate: DateTime.parse(json['registration_date'] as String),
       steps: (json['steps'] as List<dynamic>)
           .map((e) => Step.fromJson(e as Map<String, dynamic>))
@@ -122,6 +129,7 @@ class Patient {
       'name': name,
       'phone': phone,
       'address': address,
+      'note': note,
       'registration_date': registrationDate.toIso8601String(),
       'steps': steps.map((e) => e.toJson()).toList(),
     };

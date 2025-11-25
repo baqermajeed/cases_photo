@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # JWT
     JWT_SECRET: str = "change-me"
-    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    JWT_EXPIRE_MINUTES: int = 60 * 24  # 1 day
 
     # Upload validation
     MAX_UPLOAD_MB: int = 10

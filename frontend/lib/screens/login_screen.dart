@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../services/auth_service.dart';
+import '../core/utils/dialogs.dart';
 import 'patients_list_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -44,14 +45,17 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => const PatientsListScreen()),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'فشل تسجيل الدخول'),
-          backgroundColor: AppTheme.errorRed,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
+      final msg = (result['message'] as String?) ?? 'فشل تسجيل الدخول';
+      if (msg.contains('الإنترنت')) {
+        await Dialogs.showNoInternetDialog(context);
+      } else if (msg.contains('كلمة المرور') || msg.contains('اسم المستخدم')) {
+        await Dialogs.showWarningDialog(context, 'اسم المستخدم أو كلمة المرور غير صحيحة');
+      } else {
+        final retry = await Dialogs.showErrorRetryDialog(context, msg);
+        if (retry) {
+          await _login();
+        }
+      }
     }
   }
 

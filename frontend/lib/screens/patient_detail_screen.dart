@@ -8,8 +8,10 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../core/theme/app_theme.dart';
+import '../core/utils/dialogs.dart';
 import '../models/patient.dart';
 import '../services/patient_service.dart';
+import '../services/auth_service.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final String patientId;
@@ -22,17 +24,80 @@ class PatientDetailScreen extends StatefulWidget {
 
 class _PatientDetailScreenState extends State<PatientDetailScreen> {
   final _patientService = PatientService();
+  final _authService = AuthService();
   final _imagePicker = ImagePicker();
   final _scrollController = ScrollController();
   Patient? _patient;
   bool _isLoading = true;
   bool _dirty = false;
   int _selectedPhase = 1; // 1=قبل, 2=أثناء, 3=بعد, 4=المعالجة
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _loadPatient();
+    _loadUserRole();
+  }
+
+  Future<void> _openNoteDialog() async {
+    if (_patient == null) return;
+    final controller = TextEditingController(text: _patient!.note ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('إضافة/تعديل ملاحظة'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: TextField(
+            controller: controller,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              labelText: 'اكتب ملاحظتك هنا',
+              alignLabelWithHint: true,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      final result = await _patientService.updatePatient(
+        id: _patient!.id,
+        name: _patient!.name,
+        phone: _patient!.phone,
+        address: _patient!.address,
+        note: controller.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      if (result['success'] == true) {
+        final updated = result['patient'] as Patient;
+        setState(() {
+          _patient = updated;
+          _dirty = true;
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['message'] ?? 'فشل حفظ الملاحظة')),
+        );
+      }
+    }
   }
 
   Future<void> _loadPatient() async {
@@ -44,6 +109,17 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadUserRole() async {
+    try {
+      final user = await _authService.getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _isAdmin = user?.isAdmin ?? false;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _pickImages(int stepNumber) async {
@@ -122,12 +198,36 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'فشل الرفع'),
-          backgroundColor: AppTheme.errorRed,
-        ),
-      );
+      final msg = result['message']?.toString() ?? 'فشل الرفع';
+      if (msg.contains('الإنترنت')) {
+        await Dialogs.showNoInternetDialog(context);
+      } else {
+        final retry = await Dialogs.showErrorRetryDialog(context, msg);
+        if (retry) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const Center(child: CircularProgressIndicator()),
+          );
+          final again = await _patientService.uploadImages(
+            patientId: widget.patientId,
+            stepNumber: stepNumber,
+            images: images,
+          );
+          if (!mounted) return;
+          Navigator.pop(context);
+          if (again['success'] == true) {
+            await _refreshStep(stepNumber);
+            _dirty = true;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('تم رفع الصور بنجاح'),
+                backgroundColor: AppTheme.successGreen,
+              ),
+            );
+          }
+        }
+      }
     }
   }
 
@@ -142,6 +242,16 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
       final updated = step.copyWith(isDone: !step.isDone);
       _replaceStep(updated);
       _dirty = true;
+    } else {
+      final msg = result['message']?.toString() ?? 'فشل تحديث الخطوة';
+      if (msg.contains('الإنترنت')) {
+        await Dialogs.showNoInternetDialog(context);
+      } else {
+        final retry = await Dialogs.showErrorRetryDialog(context, msg);
+        if (retry) {
+          await _toggleStepDone(step);
+        }
+      }
     }
   }
 
@@ -211,6 +321,16 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               backgroundColor: AppTheme.successGreen,
             ),
           );
+        }
+      } else {
+        final msg = result['message']?.toString() ?? 'فشل حذف الصورة';
+        if (msg.contains('الإنترنت')) {
+          await Dialogs.showNoInternetDialog(context);
+        } else {
+          final retry = await Dialogs.showErrorRetryDialog(context, msg);
+          if (retry) {
+            await _deleteImage(stepNumber, imageId);
+          }
         }
       }
     }
@@ -392,23 +512,41 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildInfoRow('الاسم', p.name, const Color(0xFF5BA8D0), valueFontSize: 16, labelFontSize: 16),
+                    _buildInfoRow('الاسم', p.name, const Color(0xFF5BA8D0)),
                     const SizedBox(height: 14),
                     _buildInfoRow('رقم الهاتف', p.phone, Colors.grey.shade700),
                     const SizedBox(height: 14),
                     _buildInfoRow('المدينة', p.address, Colors.grey.shade700),
                     const SizedBox(height: 14),
                     _buildInfoRow('تاريخ التسجيل', intl.DateFormat('dd/MM/yyyy', 'ar').format(p.registrationDate), Colors.grey.shade700),
-                    const SizedBox(height: 14),
-                    _buildInfoRow('الخطوات المنجزة', '${p.completedStepsCount} من ${p.steps.length}', Colors.grey.shade700),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _openNoteDialog,
+                        icon: const Icon(Icons.note_add_outlined, size: 18),
+                        label: const Text('إضافة ملاحظة'),
+                      ),
+                    ),
+                    if (p.note != null && p.note!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        p.note!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               const SizedBox(width: 16),
               // الصورة على اليمين
               Container(
-                width: 120,
-                height: 155,
+                width: 130,
+                height: 160,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   color: avatarUrl == null ? Colors.grey.shade200 : null,
@@ -419,13 +557,13 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                         borderRadius: BorderRadius.circular(12),
                         child: CachedNetworkImage(
                           imageUrl: avatarUrl,
-                          width: 120,
-                          height: 155,
+                          width: 130,
+                          height: 160,
                           fit: BoxFit.cover,
-                          memCacheHeight: 310,
-                          memCacheWidth: 240,
-                          maxHeightDiskCache: 360,
-                          maxWidthDiskCache: 280,
+                          memCacheHeight: 320,  // ضعف الحجم للشاشات عالية الدقة
+                          memCacheWidth: 260,
+                          maxHeightDiskCache: 400,
+                          maxWidthDiskCache: 320,
                           placeholder: (context, url) => Container(
                             color: Colors.grey.shade200,
                             child: const Center(child: CircularProgressIndicator()),
@@ -451,7 +589,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                     Text(
                       'التقدم العام',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: Colors.grey.shade700,
                       ),
@@ -465,7 +603,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               Text(
                 '${progress.toStringAsFixed(0)}%',
                 style: const TextStyle(
-                  fontSize: 12,
+                  fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF5BA8D0),
                 ),
@@ -477,14 +615,14 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, Color labelColor, {double valueFontSize = 12, double labelFontSize = 12}) {
+  Widget _buildInfoRow(String label, String value, Color labelColor) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           '$label : ',
           style: TextStyle(
-            fontSize: labelFontSize,
+            fontSize: 15,
             color: labelColor,
             fontWeight: FontWeight.w600,
           ),
@@ -493,7 +631,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
           child: Text(
             value,
             style: TextStyle(
-              fontSize: valueFontSize,
+              fontSize: 15,
               color: Colors.grey.shade800,
               fontWeight: FontWeight.w500,
             ),
@@ -526,7 +664,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         const SizedBox(width: 12),
         Expanded(
           child: _buildButton(
-            'بعد العملية',
+            'المعالجة',
             _selectedPhase == 3 ? const Color(0xFF5BA8D0) : Colors.white,
             _selectedPhase == 3 ? Colors.white : Colors.grey.shade800,
             () => setState(() => _selectedPhase = 3),
@@ -535,7 +673,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         const SizedBox(width: 12),
         Expanded(
           child: _buildButton(
-            'المعالجة',
+            'بعد العملية',
             _selectedPhase == 4 ? const Color(0xFF5BA8D0) : Colors.white,
             _selectedPhase == 4 ? Colors.white : Colors.grey.shade800,
             () => setState(() => _selectedPhase = 4),
@@ -577,19 +715,21 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     } else if (_selectedPhase == 2) {
       stepNumbers = [9, 10, 11, 12, 13, 14];
     } else if (_selectedPhase == 3) {
-      stepNumbers = [15, 16, 17, 18, 19, 20, 21, 22];
+      // المعالجة
+      stepNumbers = [24];
     } else {
-      stepNumbers = [23]; // مرحلة المعالجة
+      // بعد العملية
+      stepNumbers = [15, 16, 17, 18, 19, 20, 21, 22, 23, 25];
     }
 
     final steps = _patient!.steps.where((s) => stepNumbers.contains(s.stepNumber)).toList();
 
     return Column(
-      children: steps.map((step) => _buildStepCard(step)).toList(),
+      children: steps.asMap().entries.map((e) => _buildStepCard(e.value, e.key + 1)).toList(),
     );
   }
 
-  Widget _buildStepCard(Step step) {
+  Widget _buildStepCard(Step step, int displayNumber) {
     final isDone = step.isDone;
     final hasImages = step.images.isNotEmpty;
 
@@ -628,7 +768,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               // عنوان الخطوة
               Expanded(
                 child: Text(
-                  '${step.stepNumber}. ${step.title}',
+                  '$displayNumber. ${step.title}',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -677,6 +817,43 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
               ),
             ],
           ),
+          // تاريخ آخر رفع + المرفوع بواسطة
+          if (hasImages)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule_rounded, size: 14, color: Colors.grey.shade500),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Builder(builder: (context) {
+                      // إيجاد آخر صورة مرفوعة
+                      final sorted = [...step.images]..sort((a, b) => b.uploadedAt.compareTo(a.uploadedAt));
+                      final latest = sorted.first;
+                      final formatted = intl.DateFormat('dd/MM/yyyy HH:mm', 'ar').format(latest.uploadedAt);
+                      final uploader = latest.uploadedByUsername;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'آخر رفع: $formatted',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                          ),
+                          if (uploader != null && uploader.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                'تم رفع الصورة من قبل المستخدم ($uploader)',
+                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                        ],
+                      );
+                    }),
+                  ),
+                ],
+              ),
+            ),
           // شريط الصور
           if (hasImages)
             Padding(
@@ -728,17 +905,19 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                           Positioned(
                             top: 4,
                             right: 4,
-                            child: GestureDetector(
-                              onTap: () => _deleteImage(step.stepNumber, img.id),
-                              child: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFEF4444),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.close_rounded, color: Colors.white, size: 14),
-                              ),
-                            ),
+                            child: _isAdmin
+                                ? GestureDetector(
+                                    onTap: () => _deleteImage(step.stepNumber, img.id),
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFFEF4444),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.close_rounded, color: Colors.white, size: 14),
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                         ],
                       ),
@@ -775,6 +954,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
     final nameController = TextEditingController(text: _patient!.name);
     final phoneController = TextEditingController(text: _patient!.phone);
     final addressController = TextEditingController(text: _patient!.address);
+    final noteController = TextEditingController(text: _patient!.note ?? '');
     final formKey = GlobalKey<FormState>();
 
     final saved = await showDialog<bool>(
@@ -805,6 +985,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                     controller: addressController,
                     decoration: const InputDecoration(labelText: 'العنوان'),
                     validator: (v) => (v == null || v.trim().isEmpty) ? 'العنوان مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: noteController,
+                    decoration: const InputDecoration(labelText: 'ملاحظة (اختياري)'),
+                    maxLines: 4,
                   ),
                 ],
               ),
@@ -838,6 +1023,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         name: nameController.text.trim(),
         phone: phoneController.text.trim(),
         address: addressController.text.trim(),
+        note: noteController.text.trim(),
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -851,9 +1037,15 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
           const SnackBar(content: Text('تم تحديث بيانات المريض'), backgroundColor: Color(0xFF10B981)),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message'] ?? 'فشل في تحديث البيانات')),
-        );
+        final msg = result['message']?.toString() ?? 'فشل في تحديث البيانات';
+        if (msg.contains('الإنترنت')) {
+          await Dialogs.showNoInternetDialog(context);
+        } else {
+          final retry = await Dialogs.showErrorRetryDialog(context, msg);
+          if (retry) {
+            await _openEditPatientDialog();
+          }
+        }
       }
     }
   }
@@ -870,9 +1062,11 @@ class _PhasedProgressBar extends StatelessWidget {
     } else if (phase == 2) {
       steps = [9, 10, 11, 12, 13, 14];
     } else if (phase == 3) {
-      steps = [15, 16, 17, 18, 19, 20, 21, 22];
+      // المعالجة
+      steps = [24];
     } else {
-      steps = [23];
+      // بعد العملية
+      steps = [15, 16, 17, 18, 19, 20, 21, 22, 23, 25];
     }
     final phaseSteps = patient.steps.where((s) => steps.contains(s.stepNumber)).toList();
     if (phaseSteps.isEmpty) return 0.0;

@@ -4,7 +4,6 @@ from passlib.context import CryptContext
 from ..models.user import Photographer
 from ..config import settings
 from ..utils.jwt_utils import create_access_token
-from datetime import timedelta
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -27,8 +26,4 @@ async def authenticate_user(username: str, password: str) -> Optional[Photograph
 
 
 async def issue_access_token(user: Photographer) -> str:
-    return create_access_token(
-        str(user.id),
-        settings.JWT_SECRET,
-        expires_delta=timedelta(minutes=settings.JWT_EXPIRE_MINUTES),
-    )
+    return create_access_token(str(user.id), settings.JWT_SECRET, settings.JWT_EXPIRE_MINUTES)

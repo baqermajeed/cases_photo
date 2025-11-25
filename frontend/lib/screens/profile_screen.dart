@@ -116,8 +116,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 24),
 
-                        // Admin features (إحصائيات وزر المكتملين)
-                        if (_user!.isAdmin) ..._buildAdminSection(),
+                        // إحصائيات متاحة للجميع (المصورين والمديرين)
+                        ..._buildAdminSection(),
 
                         const SizedBox(height: 24),
 

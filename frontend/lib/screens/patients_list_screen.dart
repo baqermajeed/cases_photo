@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 import 'package:intl/intl.dart' as intl;
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/theme/app_theme.dart';
@@ -7,7 +6,6 @@ import '../models/patient.dart';
 import '../models/user.dart';
 import '../services/patient_service.dart';
 import '../services/auth_service.dart';
-import '../core/network/connectivity_service.dart';
 import 'add_patient_screen.dart';
 import 'patient_detail_screen.dart';
 import 'profile_screen.dart';
@@ -25,8 +23,6 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
   final _patientService = PatientService();
   final _authService = AuthService();
   final _searchController = TextEditingController();
-  final _net = ConnectivityService.instance;
-  Timer? _searchDebounce;
   List<Patient> _patients = [];
   bool _isLoading = false;
   String? _searchQuery;
@@ -35,7 +31,6 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
   @override
   void initState() {
     super.initState();
-    _net.init();
     _loadCurrentUser();
     _loadPatients();
   }
@@ -49,7 +44,6 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
 
   @override
   void dispose() {
-    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -95,7 +89,7 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
       setState(() {
         _isLoading = false;
         if (result['success'] == true) {
-          _patients = (result['patients'] as List<Patient>).toList();
+          _patients = result['patients'] as List<Patient>;
           if (widget.showIncompleteOnly) {
             _patients = _patients.where((p) => p.progressPercentage < 100).toList();
           }
@@ -117,10 +111,7 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
 
   void _onSearch(String query) {
     _searchQuery = query.trim().isEmpty ? null : query.trim();
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
-      _loadPatients(query: _searchQuery);
-    });
+    _loadPatients(query: _searchQuery);
   }
 
   Future<void> _deletePatient(Patient patient) async {
@@ -222,23 +213,6 @@ class _PatientsListScreenState extends State<PatientsListScreen> {
         ),
         body: Column(
           children: [
-            // Online/offline banner
-            ValueListenableBuilder<bool>(
-              valueListenable: _net.online,
-              builder: (context, online, _) {
-                if (online) return const SizedBox.shrink();
-                return Container(
-                  width: double.infinity,
-                  color: Colors.amber.shade700,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: const Text(
-                    'لا يوجد اتصال بالإنترنت - يتم عرض بيانات مخزنة',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    textAlign: TextAlign.center,
-                  ),
-                );
-              },
-            ),
             // Search bar
             Container(
               padding: const EdgeInsets.all(16),
@@ -602,9 +576,11 @@ class _PhasedProgressBar extends StatelessWidget {
     } else if (phase == 2) {
       steps = [9, 10, 11, 12, 13, 14];
     } else if (phase == 3) {
-      steps = [15, 16, 17, 18, 19, 20, 21, 22];
+      // المعالجة
+      steps = [24];
     } else {
-      steps = [23];
+      // بعد العملية
+      steps = [15, 16, 17, 18, 19, 20, 21, 22, 23, 25];
     }
     final phaseSteps = patient.steps.where((s) => steps.contains(s.stepNumber)).toList();
     if (phaseSteps.isEmpty) return 0.0;
